@@ -105,6 +105,15 @@ def http(url: str, data: bytes | None = None, headers: dict | None = None, timeo
     raise FetchError(f"{url.split('?')[0]}: {last}")
 
 
+def get_json(url: str, data: bytes | None = None, headers: dict | None = None):
+    body = http(url, data, headers)
+    try:
+        return json.loads(body)
+    except ValueError:
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body.decode("utf-8", "replace"))).strip()
+        raise FetchError(f"{url.split('?')[0]} svarade inte med JSON: {text[:160]!r}") from None
+
+
 # --- Tömningsregler ----------------------------------------------------------
 
 def rule_dates(rule: str, per_year: int, start: dt.date, end: dt.date) -> list[dt.date] | None:
@@ -164,7 +173,7 @@ def project(rule: str, per_year: int, official_future: set[dt.date], today: dt.d
 
 def find_building(search: str) -> str:
     body = json.dumps({"searchText": search}).encode()
-    res = json.loads(http(f"{BASE}/SearchAdress", body, {"Content-Type": "application/json; charset=utf-8"}))
+    res = get_json(f"{BASE}/SearchAdress", body, {"Content-Type": "application/json; charset=utf-8"})
     hits = res.get("Buildings") or []
     if not res.get("Succeeded") or not hits:
         raise FetchError("adressen gav ingen träff")
@@ -250,7 +259,7 @@ def fetch(search: str, old_bins: dict, today: dt.date) -> tuple[dict, list[str]]
     """Returnerar (kärl, varningar). Kastar FetchError om grunddata saknas."""
     building = find_building(search)
     q = urllib.parse.urlencode({"address": building})
-    data = json.loads(http(f"{BASE}/GetWastePickupSchedule?{q}"))
+    data = get_json(f"{BASE}/GetWastePickupSchedule?{q}")
     services = [s for s in data.get("RhServices") or [] if s.get("IsActive", True)]
     if not services:
         raise FetchError("schemat innehöll inga kärl")
