@@ -1,0 +1,58 @@
+{
+  "hamtat": "2026-11-26",
+  "fel_i_rad": 0,
+  "karl": {
+    "Glas OF/FG": {
+      "regel": "Glas, Vecka 9 Torsdag",
+      "per_ar": 4,
+      "placering": "Handtag och hjul ut mot vägen",
+      "karl": "1 st 140 L tvåfackskärl",
+      "datum": [
+        "2026-11-26"
+      ],
+      "regel_ok": true,
+      "prognos": [
+        "2027-03-04"
+      ]
+    },
+    "Mat/Rest": {
+      "regel": "Onsdag udda vecka",
+      "per_ar": 26,
+      "placering": "Handtag och hjul vänt mot fastighet",
+      "karl": "1 st 240 L tvåfackskärl",
+      "datum": [
+        "2026-12-02",
+        "2026-12-16",
+        "2026-12-30"
+      ],
+      "regel_ok": true,
+      "prognos": [
+        "2027-01-06",
+        "2027-01-20",
+        "2027-02-03",
+        "2027-02-17",
+        "2027-03-03",
+        "2027-03-17"
+      ]
+    },
+    "Plast/Papper": {
+      "regel": "Onsdag jämn vecka",
+      "per_ar": 26,
+      "placering": "Handtag och hjul ut mot vägen",
+      "karl": "1 st 370 L tvåfackskärl",
+      "datum": [
+        "2026-12-09",
+        "2026-12-23"
+      ],
+      "regel_ok": true,
+      "prognos": [
+        "2027-01-13",
+        "2027-01-27",
+        "2027-02-10",
+        "2027-02-24",
+        "2027-03-10",
+        "2027-03-24"
+      ]
+    }
+  }
+}
