@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """Påminnelser om sophämtning i Nacka: kalenderfil (ICS) och mobilnotiser (ntfy).
 
-Hämtar hämtschemat från Nacka vatten och avfalls tjänst (futureweb.nvoa.se),
-skriver sophamtning.ics, jämför med förra körningen och skickar notiser:
-kvällen före varje tömning, när schemat ändras och när hämtningen slutar fungera.
+Två delar, som kan köras var för sig:
 
-Körs två gånger om dagen av .github/workflows/uppdatera.yml.
+  --hamta   Hämtar hämtschemat från Nacka vatten och avfalls tjänst
+            (futureweb.nvoa.se), skriver state.json och sophamtning.ics och
+            skickar notis när schemat ändras eller hämtningen slutar fungera.
+            Körs på Macen (mac/kor.sh), eftersom sajten spärrar molnservrar.
+  --paminn  Skickar påminnelsen kvällen före utifrån state.json och larmar om
+            schemat inte har hämtats på några dagar. Skriver paminda.json.
+            Körs av GitHub (.github/workflows/paminnelser.yml).
+
+Utan flagga körs båda.
 
 Miljövariabler:
-  SOPHAMTNING_ADRESS  adressen som den skrivs i sökrutan, t.ex. "Storgatan 1" (krävs)
+  SOPHAMTNING_ADRESS  adressen som den skrivs i sökrutan (krävs för --hamta)
   NTFY_TOPIC          ntfy-ämnet som notiserna skickas till (utan det: inga notiser)
   NTFY_SERVER         standard https://ntfy.sh
   PAMINNELSE_KL       klockslag för påminnelsen kvällen före, standard 19:00
 
-Adressen skrivs aldrig ut i loggen eller i filerna, eftersom repot kan vara publikt.
+Adressen skrivs aldrig ut i loggen eller i filerna, eftersom repot är publikt.
 """
 
 from __future__ import annotations
@@ -38,10 +44,12 @@ TZ = ZoneInfo("Europe/Stockholm")
 ROOT = Path(__file__).resolve().parent
 STATE_FILE = ROOT / "state.json"
 ICS_FILE = ROOT / "sophamtning.ics"
+PAMINDA_FILE = ROOT / "paminda.json"
 
 PROGNOS_DAGAR = 120     # så långt fram förutses datum enligt tömningsregeln
 BEHALL_PASSERADE = 60   # dagar som passerade tömningar ligger kvar i kalendern
-LARM_EFTER_FEL = 4      # notis efter så många misslyckade körningar i rad (två per dag)
+LARM_EFTER_FEL = 4      # notis efter så många misslyckade hämtningar i rad (två per dag)
+INAKTUELL_DAGAR = 3    # notis om schemat inte har hämtats på så många dagar
 
 WEEKDAYS = {"måndag": 0, "tisdag": 1, "onsdag": 2, "torsdag": 3, "fredag": 4, "lördag": 5, "söndag": 6}
 SV_DAY = ["mån", "tis", "ons", "tor", "fre", "lör", "sön"]
@@ -463,30 +471,16 @@ def carry_over(old_bins: dict, today: dt.date) -> dict:
 
 # --- Huvudprogram ------------------------------------------------------------
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Hämtschema till kalender och mobilnotiser.")
-    ap.add_argument("--idag", type=dt.date.fromisoformat, help="låtsas att det är detta datum (test)")
-    ap.add_argument("--torrkorning", action="store_true", help="skicka inga notiser och skriv inga filer")
-    args = ap.parse_args(argv)
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
+
+def run_fetch(args, today: dt.date, kl: dt.time, send) -> int:
+    """Hämta schemat, notis vid ändringar och fel, skriv state.json och kalenderfilen."""
     search = os.environ.get("SOPHAMTNING_ADRESS", "").strip()
     if not search:
         print("SOPHAMTNING_ADRESS saknas.", file=sys.stderr)
         return 2
-    kl = dt.time.fromisoformat(os.environ.get("PAMINNELSE_KL", "19:00"))
-    now = dt.datetime.now(TZ)
-    today = args.idag or now.date()
-    if args.idag:
-        now = dt.datetime.combine(today, dt.time(12), TZ)
-
-    def send(*a, **k):
-        try:
-            (print_notice if args.torrkorning else notify)(*a, **k)
-            return True
-        except Exception as e:
-            print(f"VARNING: notisen kunde inte skickas ({e})")
-            return False
-
     state = load_state()
     old_bins = state.get("karl", {})
     first_run = not old_bins
@@ -500,6 +494,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         bins, problem, fetched = carry_over(old_bins, today), f"{type(e).__name__}: {e}", False
 
+    if fetched:
+        state["hamtat"] = today.isoformat()
     if problem:
         state["fel_i_rad"] = state.get("fel_i_rad", 0) + 1
         state.setdefault("fel_sedan", today.isoformat())
@@ -522,17 +518,7 @@ def main(argv: list[str] | None = None) -> int:
         if msgs:
             send("Sophämtning: schemat har ändrats", "\n".join(msgs), tags=["warning"], priority=4)
 
-    reminded = [d for d in state.get("paminda", [])
-                if dt.date.fromisoformat(d) >= today - dt.timedelta(30)]
-    r = reminder(bins, today, now, kl)
-    key = (today + dt.timedelta(1)).isoformat()
-    if r and key not in reminded:
-        title, message, at = r
-        if send(title, message, at=at):
-            reminded.append(key)
-    state["paminda"] = sorted(reminded)
     state["karl"] = bins
-
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     ics = make_ics(bins, stamp, kl)
     print("Nästa tömning:\n  " + next_pickups(bins, today).replace("\n", "\n  "))
@@ -545,6 +531,78 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Skrev {ICS_FILE.name} ({ics.count('BEGIN:VEVENT')} händelser)")
         STATE_FILE.write_text(dump_state(state), encoding="utf-8")
     return 1 if state["fel_i_rad"] >= LARM_EFTER_FEL else 0
+
+
+def run_remind(args, today: dt.date, now: dt.datetime, kl: dt.time, send) -> int:
+    """Påminnelse kvällen före utifrån sparat schema, och larm om schemat är gammalt.
+    Behöver ingen adress och ingen kontakt med sajten."""
+    state = load_state()
+    bins = state.get("karl", {})
+    if not bins:
+        print("Inget sparat schema än (state.json saknas).")
+        return 0
+    log = load_json(PAMINDA_FILE)
+    ok = True
+
+    hamtat = state.get("hamtat")
+    if hamtat and (today - dt.date.fromisoformat(hamtat)).days >= INAKTUELL_DAGAR:
+        print(f"VARNING: schemat hämtades senast {hamtat}.")
+        if log.get("inaktuell_larm") != hamtat:
+            if send("Sophämtning: schemat har inte uppdaterats",
+                    f"Schemat hämtades senast {hamtat}. Hämtningen körs på Macen, så den är "
+                    "kanske avstängd. Påminnelserna fortsätter utifrån det senast hämtade schemat, "
+                    "men ändringar upptäcks inte.", tags=["warning"], priority=4):
+                log["inaktuell_larm"] = hamtat
+
+    reminded = [d for d in log.get("paminda", [])
+                if dt.date.fromisoformat(d) >= today - dt.timedelta(30)]
+    r = reminder(bins, today, now, kl)
+    key = (today + dt.timedelta(1)).isoformat()
+    if r and key not in reminded:
+        title, message, at = r
+        if send(title, message, at=at):
+            reminded.append(key)
+        else:
+            ok = False
+    elif not r:
+        print("Ingen tömning i morgon.")
+    log["paminda"] = sorted(reminded)
+    if not args.torrkorning:
+        PAMINDA_FILE.write_text(json.dumps(log, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return 0 if ok else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Hämtschema till kalender och mobilnotiser.")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--hamta", action="store_true", help="bara hämtning, ändringsnotiser och kalenderfil")
+    mode.add_argument("--paminn", action="store_true", help="bara påminnelser utifrån sparat schema")
+    ap.add_argument("--idag", type=dt.date.fromisoformat, help="låtsas att det är detta datum (test)")
+    ap.add_argument("--torrkorning", action="store_true", help="skicka inga notiser och skriv inga filer")
+    args = ap.parse_args(argv)
+
+    kl = dt.time.fromisoformat(os.environ.get("PAMINNELSE_KL", "19:00"))
+    now = dt.datetime.now(TZ)
+    today = args.idag or now.date()
+    if args.idag:
+        now = dt.datetime.combine(today, dt.time(12), TZ)
+
+    def send(*a, **k):
+        try:
+            (print_notice if args.torrkorning else notify)(*a, **k)
+            return True
+        except Exception as e:
+            print(f"VARNING: notisen kunde inte skickas ({e})")
+            return False
+
+    code = 0
+    if not args.paminn:
+        code = run_fetch(args, today, kl, send)
+        if code == 2 or (code == 1 and not STATE_FILE.exists()):
+            return code
+    if not args.hamta:
+        code = max(code, run_remind(args, today, now, kl, send))
+    return code
 
 
 if __name__ == "__main__":

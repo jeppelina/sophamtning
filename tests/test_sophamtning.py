@@ -183,7 +183,7 @@ class Calendar(unittest.TestCase):
 class EndToEnd(unittest.TestCase):
     """Kör main() flera dagar i rad med låtsad hämtning och fångar notiserna."""
 
-    def run_day(self, day, services=SERVICES, text=PDF_TEXT, fail=False):
+    def run_day(self, day, services=SERVICES, text=PDF_TEXT, fail=False, flags=(), env=None):
         def fake_fetch(search, old_bins, today):
             if fail:
                 raise s.FetchError("sajten svarar inte")
@@ -191,15 +191,17 @@ class EndToEnd(unittest.TestCase):
         sent = []
         with mock.patch.object(s, "fetch", fake_fetch), \
              mock.patch.object(s, "notify", lambda title, msg, **k: sent.append((title, msg, k))), \
-             mock.patch.dict("os.environ", {"SOPHAMTNING_ADRESS": "Testvägen 1"}):
-            code = s.main(["--idag", day.isoformat()])
+             mock.patch.dict("os.environ", env if env is not None else {"SOPHAMTNING_ADRESS": "Testvägen 1"},
+                             clear=env is not None):
+            code = s.main(["--idag", day.isoformat(), *flags])
         return code, sent
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         d = Path(self.tmp.name)
         self.patches = [mock.patch.object(s, "STATE_FILE", d / "state.json"),
-                        mock.patch.object(s, "ICS_FILE", d / "sophamtning.ics")]
+                        mock.patch.object(s, "ICS_FILE", d / "sophamtning.ics"),
+                        mock.patch.object(s, "PAMINDA_FILE", d / "paminda.json")]
         for p in self.patches:
             p.start()
 
@@ -241,6 +243,28 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(code, 1)
         _, sent = self.run_day(D(2026, 12, 2))
         self.assertIn("Sophämtning: schemat läses igen", [t for t, *_ in sent])
+
+    def test_split_modes(self):
+        # Macen hämtar, GitHub påminner utan adress och utan kontakt med sajten.
+        _, sent = self.run_day(D(2026, 11, 26), flags=["--hamta"])
+        self.assertEqual([t for t, *_ in sent], ["Sophämtning: påminnelser igång"])
+        self.assertFalse(s.PAMINDA_FILE.exists())
+        _, sent = self.run_day(D(2026, 12, 1), flags=["--hamta"])
+        self.assertEqual(sent, [])
+        with mock.patch.object(s, "fetch", side_effect=AssertionError("ska inte hämta")):
+            code, sent = self.run_day(D(2026, 12, 1), flags=["--paminn"], env={})
+        self.assertEqual(code, 0)
+        self.assertEqual([t for t, *_ in sent], ["Sophämtning i morgon, ons 2 dec"])
+        self.assertEqual(json.loads(s.PAMINDA_FILE.read_text())["paminda"], ["2026-12-02"])
+
+    def test_stale_schedule_alerts_once_and_keeps_reminding(self):
+        self.run_day(D(2026, 11, 26), flags=["--hamta"])
+        titles = []
+        for day in [D(2026, 11, 28), D(2026, 11, 29), D(2026, 11, 30), D(2026, 12, 1)]:
+            _, sent = self.run_day(day, flags=["--paminn"], env={})
+            titles += [t for t, *_ in sent]
+        self.assertEqual(titles, ["Sophämtning: schemat har inte uppdaterats",
+                                  "Sophämtning i morgon, ons 2 dec"])
 
 
 if __name__ == "__main__":

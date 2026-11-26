@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mall. mac/installera.sh fyller i sökvägarna och lägger den i ~/Library/LaunchAgents.
+  Hämtar schemat kl. 06.45 och 13.45, före GitHubs påminnelsekörningar. Sover Macen
+  körs jobbet när den vaknar.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>se.sophamtning.hamta</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__KATALOG__/mac/kor.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>45</integer></dict>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>StandardOutPath</key><string>__LOGG__</string>
+    <key>StandardErrorPath</key><string>__LOGG__</string>
+</dict>
+</plist>

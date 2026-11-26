@@ -2,15 +2,19 @@
 
 Påminnelser om sophämtning i Nacka, i kalendern och som notis i mobilen.
 
-Två gånger om dagen hämtar ett GitHub-arbetsflöde hämtschemat från Nacka vatten
-och avfalls tjänst (samma tjänst som sökrutan på nacka.se använder) och
+Två delar:
 
-- skriver om `sophamtning.ics`, en kalender att prenumerera på,
-- skickar en notis kvällen före varje tömning (kl. 19) med hur kärlet ska stå,
-- skickar en notis när schemat ändras: ett datum flyttas eller ställs in, en ny
-  tömningsregel, ny kärlplacering, ett kärl tillkommer eller försvinner,
-- skickar en notis om hämtningen har misslyckats två dagar i rad, och en när den
-  fungerar igen.
+- **Macen hämtar** (`mac/kor.sh`, launchd-jobbet `se.sophamtning.hamta`, kl. 06.45
+  och 13.45 och när Macen vaknar). Den läser hämtschemat från Nacka vatten och
+  avfalls tjänst (samma som sökrutan på nacka.se), skriver `state.json` och
+  `sophamtning.ics`, pushar dem hit och skickar notis när schemat ändras: ett datum
+  flyttas eller ställs in, ny tömningsregel, ny kärlplacering, ett kärl tillkommer
+  eller försvinner. Hämtningen måste köras hemifrån: sajtens brandvägg spärrar
+  GitHubs servrar ("Request Rejected").
+- **GitHub påminner** (`.github/workflows/paminnelser.yml`, två gånger om dagen).
+  Den läser `state.json` och skickar en notis kvällen före varje tömning (kl. 19)
+  med hur kärlet ska stå. Den fungerar även när Macen är avstängd, och skickar en
+  notis om schemat inte har hämtats på tre dagar.
 
 Kalendern innehåller de publicerade datumen (i dag till årsskiftet) och därefter
 preliminära datum, märkta "(prel.)", framräknade från tömningsregeln upp till fyra
@@ -33,36 +37,51 @@ Adress: `https://raw.githubusercontent.com/jeppelina/sophamtning/main/sophamtnin
 ## Notiser i mobilen
 
 Notiserna går via [ntfy](https://ntfy.sh), en gratis app för iPhone och Android.
-Installera appen och prenumerera på ämnet i repots hemlighet `NTFY_TOPIC` (det
-finns också lokalt i filen `.ntfy-topic`, som inte checkas in). Ämnesnamnet är
-slumpat och fungerar som ett lösenord: den som känner till det kan läsa notiserna.
+Installera appen och prenumerera på ämnet `NTFY_TOPIC` i `lokalt.env` (servern är
+ntfy.sh). Ämnesnamnet är slumpat och fungerar som ett lösenord: den som känner till
+det kan läsa notiserna. Det finns också som secret i repot.
 
 ## Inställningar
 
-| Var | Namn | Innehåll |
-|---|---|---|
-| Secret | `SOPHAMTNING_ADRESS` | adressen som den skrivs i sökrutan |
-| Secret | `NTFY_TOPIC` | ntfy-ämnet |
-| Variable (valfri) | `PAMINNELSE_KL` | klockslag kvällen före, standard `19:00` |
+`lokalt.env` på Macen (checkas aldrig in):
 
-Arbetsflödet kan också köras för hand: Actions → Uppdatera hämtschema → Run workflow.
+```bash
+SOPHAMTNING_ADRESS="Storgatan 1"
+NTFY_TOPIC="sopor-..."
+```
+
+På GitHub: secret `NTFY_TOPIC`, och valfritt variabeln `PAMINNELSE_KL` (standard
+`19:00`). Påminnelsekörningen kan också startas för hand under Actions.
+
+## Installera på Macen
+
+```bash
+bash mac/installera.sh
+```
+
+Skriptet lägger en egen kopia av repot i `~/Library/Application Support/sophamtning`
+(bakgrundsjobb nekas ofta åtkomst till Dokument-mappen), kopierar `lokalt.env` dit,
+bygger en Pythonmiljö och startar launchd-jobbet. Kopian hämtar ändringar från
+GitHub vid varje körning, så kod som pushas härifrån kommer med automatiskt. Logg:
+`~/Library/Logs/sophamtning.log`. Ta bort jobbet med `bash mac/installera.sh --ta-bort`.
 
 ## Vad som är publikt
 
 Repot är publikt så att kalenderfilen kan hämtas utan inloggning. Adressen finns
-bara i en secret och skrivs aldrig till loggen eller till filerna. Publikt är
-koden, kalenderfilen och `state.json`: tömningsdatum, kärltyper och placering.
+bara i `lokalt.env` på Macen och skrivs aldrig till loggen eller till filerna.
+Publikt är koden, kalenderfilen, `state.json` (tömningsdatum, kärltyper och
+placering) och `paminda.json` (vilka påminnelser som har skickats).
 
-## Köra lokalt
+## Köra och testa lokalt
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-SOPHAMTNING_ADRESS="Storgatan 1" .venv/bin/python sophamtning.py --torrkorning
+set -a; . ./lokalt.env; set +a; .venv/bin/python sophamtning.py --hamta --torrkorning
 .venv/bin/python -m unittest discover -s tests
 ```
 
 `--torrkorning` skickar inga notiser och skriver inga filer. `--idag 2026-12-01`
-låtsas att det är ett annat datum.
+låtsas att det är ett annat datum. Utan `--hamta` eller `--paminn` körs båda delarna.
 
 ## Begränsningar
 
@@ -72,5 +91,7 @@ låtsas att det är ett annat datum.
   januaridatumen fel tills schemat publiceras; då kommer en notis.
 - GitHubs schemalagda körningar kan bli försenade. Påminnelsen schemaläggs därför i
   ntfy till kl. 19, så den kommer i tid så länge någon körning hinner före dess.
+- En ändring som Macen hittar efter att kvällens påminnelse redan schemalagts
+  stoppar inte den påminnelsen, men ändringsnotisen kommer ändå.
 - Enbostadshus har behovstömning: kärlet töms bara om det står ute med rätt sida mot
   vägen. Placeringen står i varje påminnelse och kalenderhändelse.
