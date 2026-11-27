@@ -1,5 +1,5 @@
 {
-  "hamtat": "2026-11-26",
+  "hamtat": "2026-11-27",
   "fel_i_rad": 0,
   "karl": {
     "Glas OF/FG": {
@@ -8,12 +8,11 @@
       "placering": "Handtag och hjul ut mot vägen",
       "karl": "1 st 140 L tvåfackskärl",
       "datum": [
-        "2026-11-26"
+        "2026-11-26",
+        "2027-02-25"
       ],
-      "regel_ok": true,
-      "prognos": [
-        "2027-03-04"
-      ]
+      "regel_ok": false,
+      "prognos": []
     },
     "Mat/Rest": {
       "regel": "Onsdag udda vecka",
